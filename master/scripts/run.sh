@@ -1,17 +1,28 @@
 command=$2
 host=$1
-token="$(kubeadm token create --print-join-command)"
 
 case $command in
-	"setup") ./send.sh $host "setup"
+	"master")
+		./scripts/send.sh $host "master $(cat /etc/hostname)"
 		;;
-	"join") ./send.sh $host "join $token"
+	"setup-master")
+		./scripts/setup_master.sh
+		;;
+	"setup") ./scripts/send.sh $host "setup"
+		;;
+	"join") token="$(kubeadm token create --print-join-command)"
+		./scripts/send.sh $host "join $token"
 		echo "token sent"
 		;;
 	"leave")
 		kubectl drain $host
 		kubectl delete node $host
-		./send.sh $host "leave"
+		./scripts/send.sh $host "leave"
+		;;
+	"get-cpu")
+		./scripts/send.sh $host "get-cpu"
+		cpuutil=$(nc -l 124)
+		echo "$cpuutil"
 		;;
 	"cpu")
 		if [ ! -z "$3" ]; then

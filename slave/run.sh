@@ -19,7 +19,7 @@ while true; do
                         ;;
                 "leave")
                         echo "leaving the node"
-                        kubeadm reset
+                        kubeadm reset -f
                         ;;
         esac
 done

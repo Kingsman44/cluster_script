@@ -9,12 +9,23 @@ case $command in
 		echo "token sent"
 		;;
 	"leave")
-		echo "kubectl drain $host"
-		echo "kubectl delete node $host"
+		kubectl drain $host
+		kubectl delete node $host
 		./send.sh $host "leave"
+		;;
+	"cpu")
+		if [ ! -z "$3" ]; then
+			mem=$(kubectl top pod $3 | grep $3 | sed  -r "s/ +/ /g" | cut -d' ' -f2)
+			echo "CPU Usage: $mem"
+		fi
+		;;
+	"memory")
+                if [ ! -z "$3" ]; then
+                        mem=$(kubectl top pod $3 | grep $3 | sed  -r "s/ +/ /g" | cut -d' ' -f3)
+                        echo "Memory Usage: $mem"
+                fi
 		;;
 	"*")
 		echo "unknown command"
 		;;
 esac
-

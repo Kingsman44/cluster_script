@@ -9,17 +9,16 @@ while true; do
 	case "$message" in
 		"setup")
 			echo "Running Setup"
-			#./setup.sh
+			./setup.sh
 			;;
 		join*)
 			token=$(echo $message | cut -d' ' -f2-999)
 			echo "join token: $token"
-			#./join.sh $token
-			#./"$token"
+			"$token"
 			;;
 		"leave")
 			echo "leaving the node"
-			#kubeadm reset
+			kubeadm reset
 			;;
 	esac
 done

@@ -41,6 +41,12 @@ get_cpu_utilzation() {
 	echo "Current Mean CPU Utilzation of connected nodes: $CPU_UTILIZATION%"
 }
 
+setup_metrics_server() {
+	kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+	kubectl taint nodes --all node.kubernetes.io/disk-pressure-
+	kubectl apply -f yaml/metrics-server.yaml
+}
+
 echo "=================="
 echo "Hybrid Autoscaling"
 echo "=================="

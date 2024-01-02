@@ -29,10 +29,12 @@ setup_cluster_config() {
 }
 
 get_cpu_utilzation() {
-	total_usage="$(grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage}')"
+	total_usage="$(kubectl top nodes | grep "master " | awk '${print $3}' | tr -d '%'
 	total_cpu=1
 	for i in $CONNECTED_NODES; do
-		value="$(./scripts/run.sh $i get-cpu)"
+		var="$(kubectl top node $i)"
+  		value="$(echo "$var" | grep "$i " | awk '${print $3}' | tr -d '%')"
+    		echo "NODE: $i, VALUE: $value"
 		total_cpu=$(echo "scale=2 ; $total_cpu + 1" | bc)
 		total_usage=$(echo "scale=2 ; $total_usage + $value" | bc)
 	done

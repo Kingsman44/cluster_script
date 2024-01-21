@@ -8,8 +8,8 @@ CONNECTED_NODES=0
 . config.sh
 
 create_file() {
-    if [ ! -f clusters/$1/$2 ]; then
-        touch clusters/$1/$2
+    if [ ! -f cluster/$1/$2 ]; then
+        touch cluster/$1/$2
     fi
 }
 
@@ -38,29 +38,31 @@ setup_cluster_config() {
                 exit
             fi
             #echo "connection succeded"
-            mkdir -p clusters/$p
-            new_file clusters/$p/current_ram
-            new_file clusters/$p/current_status disconnected
-            new_file clusters/$p/current_cpu
-            new_file clusters/$p/current_rrt 0
+            mkdir -p cluster/$p
+            new_file cluster/$p/current_ram
+            new_file cluster/$p/current_status disconnected
+            new_file cluster/$p/current_cpu
+            new_file cluster/$p/current_rtt 0
             create_file $p cpu
             create_file $p ram
             create_file $p rtt
             NODES+=("$p")
+	    echo "${NODES[@]}"
             ./scripts/run.sh $p "$MASTER_NODE"
         fi
     done <worker.config
 }
 
 get_cpu_utilzation() {
-    total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '${print $3}' | tr -d '%')"
+    echo "$MASTER_NODE"
+    total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $3}' | tr -d '%')"
     total_cpu=1
-    for i in $NODES[@]; do
-        if [ "$(cat cluster/$i/status)" != "connected" ]; then
+    for i in ${NODES[@]}; do
+        if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
             continue
         fi
         var="$(kubectl top node $i)"
-        value="$(echo "$var" | grep "$i " | awk '${print $3}' | tr -d '%')"
+        value="$(echo "$var" | grep "$i " | awk '{print $3}' | tr -d '%')"
         echo "NODE: $i, CPU: $value"
         new_file cluster/$i/current_cpu $value
         echo $value > cluster/$i/cpu
@@ -73,14 +75,14 @@ get_cpu_utilzation() {
 }
 
 get_mem_utilzation() {
-    total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '${print $2}' | tr -d '%')"
+    total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $5}' | tr -d '%')"
     total_mem=1
-    for i in $NODES[@]; do
-        if [ "$(cat cluster/$i/status)" != "connected" ]; then
+    for i in ${NODES[@]}; do
+        if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
             continue
         fi
         var="$(kubectl top node $i)"
-        value="$(echo "$var" | grep "$i " | awk '${print $2}' | tr -d '%')"
+        value="$(echo "$var" | grep "$i " | awk '{print $5}' | tr -d '%')"
         new_file cluster/$i/current_ram $value
         echo $value > cluster/$i/ram
         echo "NODE: $i, MEMORY: $value"
@@ -93,11 +95,11 @@ get_mem_utilzation() {
 }
 
 rtt_check() {
-    for i in $NODES[@]; do
-        if [ "$(cat cluster/$i/status)" != "connected" ]; then
+    for i in ${NODES[@]}; do
+        if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
             continue
         fi
-        val="$(ping -c 1 $i | tail -1 | awk '{print $4}' | cut -d'=' -f2)"
+        val="$(ping -c 1 $i | tail -1 | awk '{print $4}' | cut -d'=' -f2 | cut -d'/' -f1)"
         val=$(echo "($val * 100)/1" | bc)
         cnt=$(cat cluster/$i/current_rtt)
         if [ $val -ge $MAX_RTT ]; then
@@ -126,17 +128,19 @@ join_node() {
     RESULT=0
     if [ ! -z "$1" ]; then
         ./scripts/run.sh $1 join
-        new_file clusters/$p/current_status connected
+        new_file cluster/$1/current_status connected
         CONNECTED_NODES=$(echo "$CONNECTED_NODES + 1"| bc)
         RESULT=1
         return
     fi
-    for i in $NODES[@]; do
-        if [ "$(cat cluster/$i/status)" != "disconnected" ]; then
+    echo "Checking available Nodes"
+    for i in ${NODES[@]}; do
+        if [ "$(cat cluster/$i/current_status)" != "disconnected" ]; then
             continue
         fi
-        val="$(ping -c 1 $i | tail -1 | awk '{print $4}' | cut -d'=' -f2)"
+        val="$(ping -c 1 $i | tail -1 | awk '{print $4}' | cut -d'=' -f2 | cut -d'/' -f1)"
         val=$(echo "($val * 100)/1" | bc)
+	echo "$i RTT:$val"
         if [ $val -lt $MIN_RTT_VAL ]; then
             MIN_RTT_VAL=$val
             SLAVE_NAME="$i"
@@ -145,7 +149,8 @@ join_node() {
     done
     if [ $RESULT -eq 1 ]; then
         ./scripts/run.sh $SLAVE_NAME join
-        new_file clusters/$p/current_status connected
+        new_file cluster/$SLAVE_NAME/current_status connected
+	echo "Connecting Node $SLAVE_NAME"
         CONNECTED_NODES=$(echo "$CONNECTED_NODES + 1"| bc)
     else
         echo "NO NODES HAD BEEN LEFT TO JOIN"
@@ -161,18 +166,18 @@ leave_node() {
     fi
     if [ ! -z "$1" ]; then
         ./scripts/run.sh $1 leave
-        new_file clusters/$p/current_status disconnected
+        new_file cluster/$1/current_status disconnected
         CONNECTED_NODES=$(echo "$CONNECTED_NODES - 1"| bc)
         RESULT=1
         return
     fi
-    for i in $NODES[@]; do
-        if [ "$(cat cluster/$i/status)" != "connected" ]; then
+    for i in ${NODES[@]}; do
+        if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
             continue
         fi
         var="$(kubectl top node $i)"
-        value_mem="$(echo "$var" | grep "$i " | awk '${print $2}' | tr -d '%')"
-        value_cpu="$(echo "$var" | grep "$i " | awk '${print $3}' | tr -d '%')"
+        value_mem="$(echo "$var" | grep "$i " | awk '{print $2}' | tr -d '%')"
+        value_cpu="$(echo "$var" | grep "$i " | awk '{print $3}' | tr -d '%')"
         val=$(echo "$value_cpu + $value_mem" | bc)
         if [ $val -lt $MIN_VAL ]; then
             MIN_VAL=$val
@@ -182,7 +187,7 @@ leave_node() {
     done
     if [ $RESULT -eq 1 ]; then
         ./scripts/run.sh $SLAVE_NAME leave
-        new_file clusters/$p/current_status disconnected
+        new_file cluster/$SLAVE_NAME/current_status disconnected
         CONNECTED_NODES=$(echo "$CONNECTED_NODES - 1"| bc)
     else
         echo "NO NODES HAD BEEN LEAVED"
@@ -205,36 +210,40 @@ echo "getting clusters from worker.config"
 cat worker.config
 echo "================="
 echo "creating cluster config"
-mkdir -p clusters
+mkdir -p cluster
 setup_cluster_config
 echo "================="
-NODES=$(ls cluster)
+NODES1=$(ls cluster)
 echo "Setting up Kubernetes on nodes"
-for node in $NODES; do
+for node in $NODES1; do
     ./scripts/run.sh $node setup
 done
 echo "================"
 rm -rf hpa.yaml
-echo "apiVersion: autoscaling/v2beta1
+echo "apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: $DEPLOYEMENT_NAME
+  name: $DEPLOYMENT_NAME
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: api
+    name: $DEPLOYMENT_NAME
   minReplicas: $minReplicas
   maxReplicas: $maxReplicas
   metrics:
   - type: Resource
     resource:
       name: cpu
-      targetAverageUtilization: $targetCPUUtilization
+      target:
+        type: Utilization
+        averageUtilization: $targetCPUUtilization
   - type: Resource
     resource:
       name: memory
-      targetAverageUtilization: $targetRAMUtilization" >> hpa.yaml
+      target:
+        type: Utilization
+        averageUtilization: $targetRAMUtilization" >> hpa.yaml
 #cp yaml/hpa.yaml hpa.yaml
 #DEPLOYMENT_NAME=$1
 #if [ -z "$DEPLOYMENT_NAME" ]; then
@@ -284,14 +293,16 @@ echo "Starting Cluster Autoscaling"
 while true; do
     #echo "Connected Nodes: master ${CONNECTED_NODES[*]}"
     #echo "Disconnected Nodes: ${DISCONNECTED_NODES[*]}"
+    echo "${NODES[@]}"
     get_cpu_utilzation
-    get_mem_utization
+    get_mem_utilzation
     if [ $CPU_UTILIZATION -ge $TARGET_CLUSTER_MEAN_CPU_UTILIZATION ]; then
         join_node
+	sleep 30
         elif [ $MEM_UTILIZATION -ge $TARGET_CLUSTER_MEAN_MEM_UTILIZATION ]; then
         join_node
+	sleep 30
     fi
-    
     if [ $MEM_UTILIZATION -le $LOWER_THRESHOLD ] && [ $CPU_UTILIZATION -le $LOWER_THRESHOLD ]; then
         if [ $LOWER_THRESHOLD_CNT -le $TARGET_LOWER_THRESHOLD ]; then
             LOWER_THRESHOLD_CNT=$(echo "$LOWER_THRESHOLD_CNT + 1" | bc)
@@ -302,7 +313,6 @@ while true; do
     else
         LOWER_THRESHOLD_CNT=0
     fi
-    
     rtt_check
     sleep 5
 done

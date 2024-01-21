@@ -25,6 +25,7 @@ new_file() {
 }
 
 setup_cluster_config() {
+    allnodes="$(kubectl get nodes)"
     while read p; do
         if [ ! -z "$p" ]; then
             # Check Connection
@@ -40,7 +41,11 @@ setup_cluster_config() {
             #echo "connection succeded"
             mkdir -p cluster/$p
             new_file cluster/$p/current_ram
-            new_file cluster/$p/current_status disconnected
+	    if [ -z "$(echo "$allnodes" | grep $p)" ]; then 
+            	new_file cluster/$p/current_status disconnected
+	    else
+                new_file cluster/$p/current_status connected
+	    fi
             new_file cluster/$p/current_cpu
             new_file cluster/$p/current_rtt 0
             create_file $p cpu
@@ -54,7 +59,7 @@ setup_cluster_config() {
 }
 
 get_cpu_utilzation() {
-    echo "$MASTER_NODE"
+    #echo "$MASTER_NODE"
     total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $3}' | tr -d '%')"
     total_cpu=1
     for i in ${NODES[@]}; do
@@ -63,7 +68,7 @@ get_cpu_utilzation() {
         fi
         var="$(kubectl top node $i)"
         value="$(echo "$var" | grep "$i " | awk '{print $3}' | tr -d '%')"
-        echo "NODE: $i, CPU: $value"
+        #echo "NODE: $i, CPU: $value"
         new_file cluster/$i/current_cpu $value
         echo $value > cluster/$i/cpu
         total_cpu=$(echo "scale=2 ; $total_cpu + 1" | bc)
@@ -72,6 +77,16 @@ get_cpu_utilzation() {
     CPU_UTILIZATION=$(echo "scale=2 ; $total_usage / $total_cpu" | bc )
     CPU_UTILIZATION=$(echo "($CPU_UTILIZATION+0.5)/1" | bc)
     echo "Current Mean CPU Utilzation of connected nodes: $CPU_UTILIZATION%"
+}
+
+print_status() {
+    echo "================================================"
+    echo " Name		| cpu 	| ram	|  status"
+    echo "==============================================="
+    for i in ${NODES[@]}; do
+	echo "$i		| $(cat cluster/$i/current_cpu)	| $(cat cluster/$i/current_ram)	 | $(cat cluster/$i/current_status)  "
+    done
+    echo "==============================================="
 }
 
 get_mem_utilzation() {
@@ -85,7 +100,7 @@ get_mem_utilzation() {
         value="$(echo "$var" | grep "$i " | awk '{print $5}' | tr -d '%')"
         new_file cluster/$i/current_ram $value
         echo $value > cluster/$i/ram
-        echo "NODE: $i, MEMORY: $value"
+        #echo "NODE: $i, MEMORY: $value"
         total_mem=$(echo "scale=2 ; $total_cpu + 1" | bc)
         total_usage=$(echo "scale=2 ; $total_usage + $value" | bc)
     done
@@ -293,9 +308,10 @@ echo "Starting Cluster Autoscaling"
 while true; do
     #echo "Connected Nodes: master ${CONNECTED_NODES[*]}"
     #echo "Disconnected Nodes: ${DISCONNECTED_NODES[*]}"
-    echo "${NODES[@]}"
+    #echo "${NODES[@]}"
     get_cpu_utilzation
     get_mem_utilzation
+    print_status
     if [ $CPU_UTILIZATION -ge $TARGET_CLUSTER_MEAN_CPU_UTILIZATION ]; then
         join_node
 	sleep 30

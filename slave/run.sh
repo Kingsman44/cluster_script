@@ -21,6 +21,8 @@ while true; do
 			fi
                         ;;
                 join*)
+			sudo modprobe br_netfilter
+			sudo sysctl -w net.ipv4.ip_forward=1
                         ip=$(echo $message | cut -d' ' -f4)
                         token=$(echo $message | cut -d' ' -f6)
                         cert=$(echo $message | cut -d' ' -f8)

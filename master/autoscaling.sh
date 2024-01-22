@@ -58,7 +58,7 @@ setup_cluster_config() {
     done <worker.config
 }
 
-get_cpu_utilzation() {
+get_utilzation() {
     #echo "$MASTER_NODE"
     total_usage_cpu="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $3}' | tr -d '%')"
     total_usage_ram="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $5}' | tr -d '%')"
@@ -86,19 +86,29 @@ get_cpu_utilzation() {
     CPU_UTILIZATION=$(echo "($CPU_UTILIZATION+0.5)/1" | bc)
     MEM_UTILIZATION=$(echo "scale=2 ; $total_usage_ram / $total_nodes" | bc )
     MEM_UTILIZATION=$(echo "($MEM_UTILIZATION+0.5)/1" | bc)
-    AVG_RTT=$(echo "scale=2 ; $total_rtt / ( $total_nodes" - 1 ) | bc)
+    if [ $total_nodes -gt 1 ]; then
+    	AVG_RTT=$(echo "scale=2 ; $total_rtt / ( $total_nodes - 1 )" | bc)
+    else
+	AVG_RTT="$(ping -c 1 localhost | tail -1 | awk '{print $4}' | cut -d'=' -f2 | cut -d'/' -f1)"
+    fi
+    echo "Average RTT $AVG_RTT"
     echo "Current Mean CPU Utilzation of connected nodes: $CPU_UTILIZATION%"
     echo "Current Mean MEMORY Utilzation of connected nodes: $MEM_UTILIZATION%"
     cpu_x="$(tail -n 4 cluster/cpu_5.txt)"
     ram_x="$(tail -n 4 cluster/ram_5.txt)"
     rtt_x="$(tail -n 4 cluster/rtt_5.txt)"
     rm -rf cluster/*.txt
+    #echo "CPU_X: $cpu_x"
     echo "$cpu_x" > cluster/cpu_5.txt
-    echo "$CPU_UTILIZATION" > cluster/cpu_5.txt
+    echo "$CPU_UTILIZATION" >> cluster/cpu_5.txt
     echo "$ram_x" > cluster/ram_5.txt
-    echo "$MEM_UTILIZATION" > cluster/ram_5.txt
+    echo "$MEM_UTILIZATION" >> cluster/ram_5.txt
     echo "$rtt_x" > cluster/rtt_5.txt
-    echo "$AVG_RTT" > cluster/rtt_5.txt
+    echo "$AVG_RTT" >> cluster/rtt_5.txt
+    awk 'NF' cluster/rtt_5.txt
+    awk 'NF' cluster/ram_5.txt
+    awk 'NF' cluster/cpu_5.txt
+
 }
 
 print_status() {
@@ -168,6 +178,13 @@ join_node() {
         new_file cluster/$1/current_status connected
         CONNECTED_NODES=$(echo "$CONNECTED_NODES + 1"| bc)
         RESULT=1
+	echo "Waiting $1 to get ready"
+        while 1>0; do
+                if [ ! -z "$(kubectl get nodes | grep $1 | grep Ready)" ]; then
+                        break;
+                fi 
+                sleep 2;
+        done
         return
     fi
     echo "Checking available Nodes"
@@ -187,8 +204,15 @@ join_node() {
     if [ $RESULT -eq 1 ]; then
         ./scripts/run.sh $SLAVE_NAME join
         new_file cluster/$SLAVE_NAME/current_status connected
-	echo "Connecting Node $SLAVE_NAME"
+	echo "Waiting for Node $SLAVE_NAME to get ready"
         CONNECTED_NODES=$(echo "$CONNECTED_NODES + 1"| bc)
+	while 1>0; do
+		if [ ! -z "$(kubectl get nodes | grep $SLAVE_NAME | grep Ready)" ]; then
+			break;
+		fi 
+		sleep 2;
+	done
+	RESULT=1
     else
         echo "NO NODES HAD BEEN LEFT TO JOIN"
     fi
@@ -338,21 +362,19 @@ while true; do
     get_utilzation
     sleep_value=5
     if [ $(wc -l < cluster/cpu_5.txt) -eq 5 ]; then
-        python predict.py
+        python3 model.py
         CPU_UTILIZATION=$(cat cluster/pred_cpu.txt)
-        MEM_UTILIZATION=$(cat cluster/pred_mem.txt)
+        MEM_UTILIZATION=$(cat cluster/pred_ram.txt)
         echo "PREDICTED AVG CPU UTILIZATION: $CPU_UTILIZATION"
         echo "PREDICTED AVG MEMORY UTILIZATION: $MEM_UTILIZATION"
-        sleep_value=1
+        sleep_value=2
     fi
     #get_mem_utilzation
     print_status
     if [ $CPU_UTILIZATION -ge $TARGET_CLUSTER_MEAN_CPU_UTILIZATION ]; then
         join_node
-	sleep 30
         elif [ $MEM_UTILIZATION -ge $TARGET_CLUSTER_MEAN_MEM_UTILIZATION ]; then
         join_node
-	sleep 30
     fi
     if [ $MEM_UTILIZATION -le $LOWER_THRESHOLD ] && [ $CPU_UTILIZATION -le $LOWER_THRESHOLD ]; then
         if [ $LOWER_THRESHOLD_CNT -le $TARGET_LOWER_THRESHOLD ]; then

@@ -94,9 +94,9 @@ get_utilzation() {
     echo "Average RTT $AVG_RTT"
     echo "Current Mean CPU Utilzation of connected nodes: $CPU_UTILIZATION%"
     echo "Current Mean MEMORY Utilzation of connected nodes: $MEM_UTILIZATION%"
-    cpu_x="$(tail -n 4 cluster/cpu_5.txt)"
-    ram_x="$(tail -n 4 cluster/ram_5.txt)"
-    rtt_x="$(tail -n 4 cluster/rtt_5.txt)"
+    cpu_x="$(tail -n 4 cluster/cpu_5.txt | awk 'NF')"
+    ram_x="$(tail -n 4 cluster/ram_5.txt | awk 'NF')"
+    rtt_x="$(tail -n 4 cluster/rtt_5.txt | awk 'NF')"
     rm -rf cluster/*.txt
     #echo "CPU_X: $cpu_x"
     echo "$cpu_x" > cluster/cpu_5.txt
@@ -105,9 +105,9 @@ get_utilzation() {
     echo "$MEM_UTILIZATION" >> cluster/ram_5.txt
     echo "$rtt_x" > cluster/rtt_5.txt
     echo "$AVG_RTT" >> cluster/rtt_5.txt
-    awk 'NF' cluster/rtt_5.txt
-    awk 'NF' cluster/ram_5.txt
-    awk 'NF' cluster/cpu_5.txt
+    #awk 'NF' cluster/rtt_5.txt > cluster/rtt_5.txt
+    #awk 'NF' cluster/ram_5.txt > cluster/ram_5.txt
+    #awk 'NF' cluster/cpu_5.txt > cluster/cpu_5.txt
 
 }
 
@@ -180,7 +180,7 @@ join_node() {
         RESULT=1
 	echo "Waiting $1 to get ready"
         while 1>0; do
-                if [ ! -z "$(kubectl get nodes | grep $1 | grep Ready)" ]; then
+                if [ ! -z "$(kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes | grep $SLAVE_NAME)" ]; then
                         break;
                 fi 
                 sleep 2;
@@ -207,7 +207,7 @@ join_node() {
 	echo "Waiting for Node $SLAVE_NAME to get ready"
         CONNECTED_NODES=$(echo "$CONNECTED_NODES + 1"| bc)
 	while 1>0; do
-		if [ ! -z "$(kubectl get nodes | grep $SLAVE_NAME | grep Ready)" ]; then
+		if [ ! -z "$(kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes | grep $SLAVE_NAME)" ]; then
 			break;
 		fi 
 		sleep 2;

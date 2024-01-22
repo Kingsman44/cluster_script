@@ -60,23 +60,45 @@ setup_cluster_config() {
 
 get_cpu_utilzation() {
     #echo "$MASTER_NODE"
-    total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $3}' | tr -d '%')"
-    total_cpu=1
+    total_usage_cpu="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $3}' | tr -d '%')"
+    total_usage_ram="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $5}' | tr -d '%')"
+    total_rtt=0
+    total_nodes=1
     for i in ${NODES[@]}; do
         if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
             continue
         fi
         var="$(kubectl top node $i)"
-        value="$(echo "$var" | grep "$i " | awk '{print $3}' | tr -d '%')"
+        value_cpu="$(echo "$var" | grep "$i " | awk '{print $3}' | tr -d '%')"
+        value_ram="$(echo "$var" | grep "$i " | awk '{print $5}' | tr -d '%')"
+        value_rtt="$(ping -c 1 $i | tail -1 | awk '{print $4}' | cut -d'=' -f2 | cut -d'/' -f1)"
         #echo "NODE: $i, CPU: $value"
-        new_file cluster/$i/current_cpu $value
-        echo $value > cluster/$i/cpu
-        total_cpu=$(echo "scale=2 ; $total_cpu + 1" | bc)
-        total_usage=$(echo "scale=2 ; $total_usage + $value" | bc)
+        new_file cluster/$i/current_cpu $value_cpu
+        new_file cluster/$i/current_ram $value_ram
+        echo $value_cpu > cluster/$i/cpu
+        echo $value_ram > cluster/$i/ram
+        total_nodes=$(echo "scale=2 ; $total_nodes + 1" | bc)
+        total_usage_cpu=$(echo "scale=2 ; $total_usage_cpu + $value_cpu" | bc)
+        total_usage_ram=$(echo "scale=2 ; $total_usage_ram + $value_ram" | bc)
+        total_rtt=$(echo "scale=2 ; $total_rtt + $value_rtt" | bc)
     done
-    CPU_UTILIZATION=$(echo "scale=2 ; $total_usage / $total_cpu" | bc )
+    CPU_UTILIZATION=$(echo "scale=2 ; $total_usage_cpu / $total_nodes" | bc )
     CPU_UTILIZATION=$(echo "($CPU_UTILIZATION+0.5)/1" | bc)
+    MEM_UTILIZATION=$(echo "scale=2 ; $total_usage_ram / $total_nodes" | bc )
+    MEM_UTILIZATION=$(echo "($MEM_UTILIZATION+0.5)/1" | bc)
+    AVG_RTT=$(echo "scale=2 ; $total_rtt / ( $total_nodes" - 1 ) | bc)
     echo "Current Mean CPU Utilzation of connected nodes: $CPU_UTILIZATION%"
+    echo "Current Mean MEMORY Utilzation of connected nodes: $MEM_UTILIZATION%"
+    cpu_x="$(tail -n 4 cluster/cpu_5.txt)"
+    ram_x="$(tail -n 4 cluster/ram_5.txt)"
+    rtt_x="$(tail -n 4 cluster/rtt_5.txt)"
+    rm -rf cluster/*.txt
+    echo "$cpu_x" > cluster/cpu_5.txt
+    echo "$CPU_UTILIZATION" > cluster/cpu_5.txt
+    echo "$ram_x" > cluster/ram_5.txt
+    echo "$MEM_UTILIZATION" > cluster/ram_5.txt
+    echo "$rtt_x" > cluster/rtt_5.txt
+    echo "$AVG_RTT" > cluster/rtt_5.txt
 }
 
 print_status() {
@@ -226,6 +248,9 @@ cat worker.config
 echo "================="
 echo "creating cluster config"
 mkdir -p cluster
+new_file cluster/cpu_5.txt
+new_file cluster/ram_5.txt
+new_file cluster/rtt_5.txt
 setup_cluster_config
 echo "================="
 NODES1=$(ls cluster)
@@ -305,12 +330,22 @@ kubectl delete -f hpa.yaml
 kubectl create -f hpa.yaml
 echo "================="
 echo "Starting Cluster Autoscaling"
+sleep_value=5
 while true; do
     #echo "Connected Nodes: master ${CONNECTED_NODES[*]}"
     #echo "Disconnected Nodes: ${DISCONNECTED_NODES[*]}"
     #echo "${NODES[@]}"
-    get_cpu_utilzation
-    get_mem_utilzation
+    get_utilzation
+    sleep_value=5
+    if [ $(wc -l < cluster/cpu_5.txt) -eq 5 ]; then
+        python predict.py
+        CPU_UTILIZATION=$(cat cluster/pred_cpu.txt)
+        MEM_UTILIZATION=$(cat cluster/pred_mem.txt)
+        echo "PREDICTED AVG CPU UTILIZATION: $CPU_UTILIZATION"
+        echo "PREDICTED AVG MEMORY UTILIZATION: $MEM_UTILIZATION"
+        sleep_value=1
+    fi
+    #get_mem_utilzation
     print_status
     if [ $CPU_UTILIZATION -ge $TARGET_CLUSTER_MEAN_CPU_UTILIZATION ]; then
         join_node
@@ -330,5 +365,5 @@ while true; do
         LOWER_THRESHOLD_CNT=0
     fi
     rtt_check
-    sleep 5
+    sleep $sleep_value
 done

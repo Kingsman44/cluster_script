@@ -121,26 +121,6 @@ print_status() {
     echo "==============================================="
 }
 
-get_mem_utilzation() {
-    total_usage="$(kubectl top nodes | grep "$MASTER_NODE " | awk '{print $5}' | tr -d '%')"
-    total_mem=1
-    for i in ${NODES[@]}; do
-        if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
-            continue
-        fi
-        var="$(kubectl top node $i)"
-        value="$(echo "$var" | grep "$i " | awk '{print $5}' | tr -d '%')"
-        new_file cluster/$i/current_ram $value
-        echo $value > cluster/$i/ram
-        #echo "NODE: $i, MEMORY: $value"
-        total_mem=$(echo "scale=2 ; $total_cpu + 1" | bc)
-        total_usage=$(echo "scale=2 ; $total_usage + $value" | bc)
-    done
-    MEM_UTILIZATION=$(echo "scale=2 ; $total_usage / $total_mem" | bc )
-    MEM_UTILIZATION=$(echo "($MEM_UTILIZATION+0.5)/1" | bc)
-    echo "Current Mean Memory Utilzation of connected nodes: $MEM_UTILIZATION%"
-}
-
 rtt_check() {
     for i in ${NODES[@]}; do
         if [ "$(cat cluster/$i/current_status)" != "connected" ]; then
@@ -277,7 +257,7 @@ new_file cluster/ram_5.txt
 new_file cluster/rtt_5.txt
 setup_cluster_config
 echo "================="
-NODES1=$(ls cluster)
+NODES1=$(ls cluster | grep -v txt)
 echo "Setting up Kubernetes on nodes"
 for node in $NODES1; do
     ./scripts/run.sh $node setup
